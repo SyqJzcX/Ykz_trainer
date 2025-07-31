@@ -37,9 +37,6 @@ class Trainer:
         # 定义属性
         self.model = model.to(self.device)
 
-        self.train_dataloader = train_dataloader
-        self.dev_dataloader = dev_dataloader
-
         self.optimizer = optimizer(model.parameters(), lr=5e-5)
         self.scheduler = scheduler(
             self.optimizer,
@@ -47,6 +44,17 @@ class Trainer:
             factor=0.1,
             patience=5
         )
+
+        self.train_dataloader = train_dataloader
+        self.dev_dataloader = dev_dataloader
+
+        if self.dev_dataloader is None and self.scheduler is optim.lr_scheduler.ReduceLROnPlateau:
+            print("没有发展集，学习率调度器自动替换为 StepLR")
+            self.scheduler = optim.lr_scheduler.StepLR(
+                self.optimizer,
+                step_size=1,
+                gamma=0.1
+            )
 
         self.scaler = scaler
 
@@ -110,7 +118,11 @@ class Trainer:
                         acc_list.append(acc)
 
                     # 更新学习率并监测验证集上的性能
-                    scheduler.step(dev_loss)
+                    self.scheduler.step(dev_loss)
+
+            # 如果没有发展集，直接更新学习率
+            else:
+                self.scheduler.step()
 
             train_loss = train_loss / \
                 len(self.train_dataloader) * self.batch_size  # 训练集每个批次的平均损失
@@ -229,7 +241,7 @@ class Trainer:
         all_train_losses = []
         all_dev_losses = []
         all_dev_accuracies = []
-        
+
         # 标志位：是否包含验证集指标（初始为None）
         has_dev_metrics = None
 
@@ -237,37 +249,40 @@ class Trainer:
         for file_path in pth_files:
             try:
                 checkpoint = torch.load(file_path)
-                
+
                 all_epochs.extend(checkpoint['epoch'])
                 all_train_losses.extend(checkpoint['train_loss'])
-                
+
                 # 如果是第一个有效文件，确定是否包含验证集指标
                 if has_dev_metrics is None:
-                    has_dev_metrics = ('dev_loss' in checkpoint and 'dev_acc' in checkpoint)
+                    has_dev_metrics = (
+                        'dev_loss' in checkpoint and 'dev_acc' in checkpoint)
                     if has_dev_metrics:
                         print("检测到验证集指标，将绘制完整曲线")
                     else:
                         print("未检测到验证集指标，仅绘制训练损失曲线")
-                
+
                 # 如果包含验证集指标，收集验证数据
                 if has_dev_metrics:
                     all_dev_losses.extend(checkpoint['dev_loss'])
                     all_dev_accuracies.extend(checkpoint['dev_acc'])
-                
+
                 print(file_path)
 
             except Exception as e:
                 print(f"读取 {file_path} 时出错，错误信息: {e}")
-        
+
         # 对数据按epoch排序（处理可能的乱序情况）
         if has_dev_metrics:
             # 对数据按epoch排序
             sorted_data = sorted(zip(all_epochs, all_train_losses,
-                                all_dev_losses, all_dev_accuracies), key=lambda x: x[0])
-            epochs, train_losses, dev_losses, dev_accuracies = zip(*sorted_data)
-            
+                                     all_dev_losses, all_dev_accuracies), key=lambda x: x[0])
+            epochs, train_losses, dev_losses, dev_accuracies = zip(
+                *sorted_data)
+
         else:
-            sorted_data = sorted(zip(all_epochs, all_train_losses), key=lambda x: x[0])
+            sorted_data = sorted(
+                zip(all_epochs, all_train_losses), key=lambda x: x[0])
             epochs, train_losses = zip(*sorted_data)
 
         # 创建图表
@@ -287,13 +302,13 @@ class Trainer:
             # 绘制验证损失曲线（左Y轴）
             ax1.plot(epochs, dev_losses, marker='s',
                      color='tab:orange', label='Validation Loss')
-            
+
             # 绘制准确率曲线（右Y轴）
             ax2 = ax1.twinx()
             color = 'tab:green'
             ax2.set_ylabel('Accuracy (%)', color=color)
             ax2.plot(epochs, [acc * 100 for acc in dev_accuracies],
-                    marker='^', color=color, label='Validation Accuracy')
+                     marker='^', color=color, label='Validation Accuracy')
             ax2.tick_params(axis='y', labelcolor=color)
 
             # 确保准确率轴范围在0-100%之间，同时留出适当边距
@@ -308,12 +323,12 @@ class Trainer:
             ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
             plt.title('Model Training Metrics Over Epochs')
-            
+
         else:
             # 仅显示训练损失
             ax1.legend(loc='best')
             plt.title('Training Loss')
-            
+
         plt.tight_layout()  # 确保布局合理
         plt.show()
 
