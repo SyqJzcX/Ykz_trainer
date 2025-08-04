@@ -2,10 +2,19 @@ import torch
 from torch import nn
 import torch.optim as optim
 from torch.amp import autocast, GradScaler
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix
+)
 from tqdm import tqdm
 import numpy as np
 from glob import glob
+import os
+import matplotlib.pyplot as plt
+from Learner.utils.lr import WarmUpCosineAnnealingLR
 
 
 class Trainer:
@@ -14,14 +23,14 @@ class Trainer:
     def __init__(
         self,
         model,  # 模型
-        train_dataloader,  # 训练集加载器
+        train_dataloader=None,  # 训练集加载器
         dev_dataloader=None,  # 发展集加载器：有无发展集均可
-        scaler=GradScaler(),  # 梯度缩放器
-        optimizer=optim.AdamW,  # 优化器
-        # 学习率调度器：验证集上的性能指标停止提升时，减小学习率来帮助模型跳出局部最优，继续优化
-        scheduler=optim.lr_scheduler.ReduceLROnPlateau,
+        criterion=None,  # 损失函数
+        optimizer=None,  # 优化器
+        scheduler=None,  # 学习率调度器
         batch_size=512,  # 样本批量
-        model_path='./model/checkpoint/',  # 模型检查点保存路径
+        total_epochs=50,  # 预期总训练轮数
+        model_path='./models/checkpoints/',  # 模型检查点保存路径
     ):
         self.batch_size = batch_size
         self.model_path = model_path
@@ -34,41 +43,51 @@ class Trainer:
             self.device = torch.device("cpu")  # 如果没有可用的 GPU，则使用 CPU
             print("使用 CPU")
 
-        # 定义属性
+        # 模型
         self.model = model.to(self.device)
 
-        self.optimizer = optimizer(model.parameters(), lr=5e-5)
-        self.scheduler = scheduler(
-            self.optimizer,
-            mode='min',
-            factor=0.1,
-            patience=5
-        )
+        # 损失函数
+        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss()
 
+        # 训练集和发展集加载器
         self.train_dataloader = train_dataloader
         self.dev_dataloader = dev_dataloader
 
-        if self.dev_dataloader is None and self.scheduler is optim.lr_scheduler.ReduceLROnPlateau:
-            print("没有发展集，学习率调度器自动替换为 StepLR")
-            self.scheduler = optim.lr_scheduler.StepLR(
-                self.optimizer,
-                step_size=1,
-                gamma=0.1
-            )
+        # 优化器
+        if optimizer is None:
+            self.optimizer = optim.SGD(
+                self.model.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4
+            )  # 默认使用 SGD 优化器
+        else:
+            self.optimizer = optimizer
 
-        self.scaler = scaler
+        # 学习率调度器
+        if scheduler is None:
+            self.scheduler = WarmUpCosineAnnealingLR(
+                self.optimizer,
+                warmup_epochs=5,
+                total_epochs=total_epochs,
+                warmup_start_factor=0.01,
+                warmup_end_factor=1.0,
+                cos_end_factor=0.01
+            )
+        else:
+            self.scheduler = scheduler
 
     def fit(
         self,
         epoch_num,  # 训练轮次数
         pretrain=0,  # 预训练模型编号（0 代表没有）
+        patience=10  # 早停耐心值
     ):
         """模型训练"""
         # 加载预训练模型
         if pretrain:
-            checkpoint = torch.load(
-                # 加载保存的检查点
-                self.model_path + f'checkpoint_{pretrain}.pth', map_location=self.device)
+            checkpoint = torch.load(  # 加载保存的检查点
+                self.model_path + f'checkpoint_{pretrain}.pth',
+                map_location=self.device,
+                weights_only=False
+            )
 
             self.model.load_state_dict(
                 checkpoint['model_state_dict'])  # 加载模型参数
@@ -95,6 +114,10 @@ class Trainer:
         train_loss_list = []  # 训练集损失列表
         dev_loss_list = []  # 发展集损失列表
         dev_acc_list = []  # 发展集准确率列表
+
+        best_dev_loss = float('inf')
+        epochs_no_improve = 0
+
         for epoch in range(epoch_num):
             # 该epoch的
             train_loss = 0.0  # 训练集损失
@@ -102,7 +125,7 @@ class Trainer:
             # 遍历训练集，训练模型参数
             self.model.train()  # 设置模型为训练模式
             # 获取每个 batch 的 loss
-            for loss in train_model():
+            for loss in self.train_model():
                 train_loss += loss.data.item()  # 获取损失值并求和
 
             # 存在发展集
@@ -113,16 +136,24 @@ class Trainer:
                     # 计算发展集上的损失值和准确度
                     dev_loss = 0.0  # 发展集损失
                     acc_list = []
-                    for loss, acc in dev_model():
+                    for loss, acc in self.dev_model():
                         dev_loss += loss.data.item()
                         acc_list.append(acc)
 
-                    # 更新学习率并监测验证集上的性能
-                    self.scheduler.step(dev_loss)
+                # 早停检查
+                if dev_loss < best_dev_loss:
+                    best_dev_loss = dev_loss
+                    epochs_no_improve = 0
+                    # 保存最佳模型
+                    torch.save(self.model.state_dict(), f"{self.model_path}best_model.pth")
+                else:
+                    epochs_no_improve += 1
+                    if epochs_no_improve >= patience:
+                        print(f"早停触发: 连续 {patience} 轮验证损失未改善")
+                        break
 
-            # 如果没有发展集，直接更新学习率
-            else:
-                self.scheduler.step()
+            # 更新学习率并监测验证集上的性能
+            self.scheduler.step()
 
             train_loss = train_loss / \
                 len(self.train_dataloader) * self.batch_size  # 训练集每个批次的平均损失
@@ -170,170 +201,70 @@ class Trainer:
         torch.save(checkpoint, self.model_path +
                    f'checkpoint_{pretrain + epoch_num}.pth')  # 保存模型
 
-    def train_model():
+    def train_model(self):
         """在训练集上个更新模型权重"""
         # TODO: 需要根据不同模型重新定义
-        for batch in tqdm(self.train_dataloader, desc="模型训练"):
-            input_ids = batch['input_ids'].to(self.device)
-            attention_mask = batch['attention_mask'].to(self.device)
-            labels = batch['labels'].to(self.device)
+        for data, label in tqdm(self.train_dataloader, desc="模型训练"):
+            data = data.to(self.device)
+            label = label.to(self.device)
+
+            out = self.model(data)  # 输出
+            loss = self.criterion(out, label)  # 损失
 
             self.optimizer.zero_grad()  # 将梯度置零放在循环开始处，以避免潜在的优化问题
-
-            # 自动管理混合精度的上下文
-            with autocast(device_type=self.device.type):
-                logits = self.model(input_ids, attention_mask=attention_mask)
-
-                # 在训练函数中计算损失
-                log_likelihood = self.model.crf(
-                    logits, labels, mask=attention_mask.byte(), reduction='mean')
-                loss = -log_likelihood
-
-            # 使用梯度缩放进行反向传播
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)  # 使用scaler来更新模型参数
-            self.scaler.update()  # 更新缩放器
+            loss.backward()  # 反向传播
+            # torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=5)  # 裁剪梯度范数，防止梯度爆炸
+            self.optimizer.step()  # 更新参数
 
             yield loss
 
-    def dev_model():
+    def dev_model(self):
         """在发展集上验证模型，并更新学习率"""
         # TODO: 需要根据不同模型重新定义
-        total_correct = 0
-        total_samples = 0
-        for batch_idx, batch in enumerate(tqdm(self.dev_dataloader, desc="模型验证")):
-            input_ids = batch['input_ids'].to(self.device)
-            attention_mask = batch['attention_mask'].to(self.device)
-            labels = batch['labels'].to(self.device)  # 仍需要labels来进行准确率计算
+        for data, label in tqdm(self.dev_dataloader, desc="模型验证"):
+            data = data.to(self.device)
+            label = label.to(self.device)
 
-            logits = self.model(input_ids, attention_mask=attention_mask)
+            out = self.model(data)  # 输出
 
-            # 计算损失
-            with autocast(device_type=self.device.type):
-                logits = self.model(input_ids, attention_mask=attention_mask)
+            loss = self.criterion(out, label)  # 损失
+            preds = torch.argmax(out, dim=1)  # 预测类别
 
-                # 在训练函数中计算损失
-                log_likelihood = self.model.crf(
-                    logits, labels, mask=attention_mask.byte(), reduction='mean')
-                loss = -log_likelihood
-
-            # 计算预测序列
-            preds = self.model.decode(logits, attention_mask)
-
-            # 计算准确率
-            acc = accuracy_score(labels, preds)
+            acc = accuracy_score(label.cpu(), preds.cpu())  # 计算准确率
 
             yield loss, acc
 
-    def train_plot(
-        self,
-        model_path
-    ):
-        '''绘制训练曲线（有无发展集数据均可）'''
-        self.model_path = model_path
-
-        # 查找目标目录下所有符合条件的.pth文件
-        file_pattern = os.path.join(self.model_path, 'checkpoint_*.pth')
-        pth_files = glob(file_pattern)
-
-        # 初始化列表用于存储各指标数据
-        all_epochs = []
-        all_train_losses = []
-        all_dev_losses = []
-        all_dev_accuracies = []
-
-        # 标志位：是否包含验证集指标（初始为None）
-        has_dev_metrics = None
-
-        # 遍历找到的文件
-        for file_path in pth_files:
-            try:
-                checkpoint = torch.load(file_path)
-
-                all_epochs.extend(checkpoint['epoch'])
-                all_train_losses.extend(checkpoint['train_loss'])
-
-                # 如果是第一个有效文件，确定是否包含验证集指标
-                if has_dev_metrics is None:
-                    has_dev_metrics = (
-                        'dev_loss' in checkpoint and 'dev_acc' in checkpoint)
-                    if has_dev_metrics:
-                        print("检测到验证集指标，将绘制完整曲线")
-                    else:
-                        print("未检测到验证集指标，仅绘制训练损失曲线")
-
-                # 如果包含验证集指标，收集验证数据
-                if has_dev_metrics:
-                    all_dev_losses.extend(checkpoint['dev_loss'])
-                    all_dev_accuracies.extend(checkpoint['dev_acc'])
-
-                print(file_path)
-
-            except Exception as e:
-                print(f"读取 {file_path} 时出错，错误信息: {e}")
-
-        # 对数据按epoch排序（处理可能的乱序情况）
-        if has_dev_metrics:
-            # 对数据按epoch排序
-            sorted_data = sorted(zip(all_epochs, all_train_losses,
-                                     all_dev_losses, all_dev_accuracies), key=lambda x: x[0])
-            epochs, train_losses, dev_losses, dev_accuracies = zip(
-                *sorted_data)
-
-        else:
-            sorted_data = sorted(
-                zip(all_epochs, all_train_losses), key=lambda x: x[0])
-            epochs, train_losses = zip(*sorted_data)
-
-        # 创建图表
-        fig, ax1 = plt.subplots(figsize=(12, 7))
-
-        # 绘制损失曲线（左Y轴）
-        color = 'tab:blue'
-        ax1.set_xlabel('Epoch')
-        ax1.set_ylabel('Loss', color=color)
-        ax1.plot(epochs, train_losses, marker='o',
-                 color=color, label='Train Loss')
-        ax1.tick_params(axis='y', labelcolor=color)
-        ax1.grid(True, linestyle='--', alpha=0.7)
-
-        # 如果有验证集指标
-        if has_dev_metrics:
-            # 绘制验证损失曲线（左Y轴）
-            ax1.plot(epochs, dev_losses, marker='s',
-                     color='tab:orange', label='Validation Loss')
-
-            # 绘制准确率曲线（右Y轴）
-            ax2 = ax1.twinx()
-            color = 'tab:green'
-            ax2.set_ylabel('Accuracy (%)', color=color)
-            ax2.plot(epochs, [acc * 100 for acc in dev_accuracies],
-                     marker='^', color=color, label='Validation Accuracy')
-            ax2.tick_params(axis='y', labelcolor=color)
-
-            # 确保准确率轴范围在0-100%之间，同时留出适当边距
-            min_acc = min(dev_accuracies) * 100
-            max_acc = max(dev_accuracies) * 100
-            margin = max(5, (max_acc - min_acc) * 0.1)  # 边距至少为5%或数据范围的10%
-            ax2.set_ylim(max(0, min_acc - margin), min(100, max_acc + margin))
-
-            # 添加图例和标题
-            lines1, labels1 = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-            plt.title('Model Training Metrics Over Epochs')
-
-        else:
-            # 仅显示训练损失
-            ax1.legend(loc='best')
-            plt.title('Training Loss')
-
-        plt.tight_layout()  # 确保布局合理
-        plt.show()
-
-    def predict(test_dataloader):
+    def predict(self, test_dataloader):
         '''模型推理'''
 
-    def eval():
+    def eval(self, test_dataloader):
         '''模型评估'''
+        # TODO: 需要根据不同模型重新定义
+        self.model.eval()  # 设置模型为评估模式
+
+        # 计算测试集上的准确度
+        test_true = []
+        test_pred = []
+        for data, label in tqdm(test_dataloader, desc="Evaluating", unit="batch"):
+            data = data.to(self.device)
+            label = label.to(self.device)
+
+            with torch.no_grad():  # 评估模式，不计算梯度，节省内存
+                out = self.model(data)  # 输出
+
+            # print(out.shape)  # 输出形状
+            # print(label.shape)  # 标签形状
+
+            pred = torch.argmax(out, dim=1)  # 预测类别
+            # lbl = torch.argmax(label, dim=1)  # 实际类别
+            test_true.extend(label.cpu())  # 放入列表末尾
+            test_pred.extend(pred.cpu())
+
+        # 计算评估指标
+        return {
+            "accuracy_score": accuracy_score(test_true, test_pred),
+            "precision_score": precision_score(test_true, test_pred, average='macro'),
+            "recall_score": recall_score(test_true, test_pred, average='macro'),
+            "f1_score": f1_score(test_true, test_pred, average='macro'),
+            "confusion_matrix": confusion_matrix(test_true, test_pred)
+        }
