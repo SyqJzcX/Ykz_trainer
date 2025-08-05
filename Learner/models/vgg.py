@@ -19,7 +19,7 @@ class VGG(nn.Module):
             nn.Conv2d(64, 64, 3, 1, 1),  # 32x32x64 ==> 32x32x64
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.MaxPool2d(2, 2)  # 16x16x64
+            nn.MaxPool2d(2, 2),  # 16x16x64
         )
         self.block2 = nn.Sequential(
             nn.Conv2d(64, 128, 3, 1, 1),  # 16x16x64 ==> 16x16x128
@@ -28,7 +28,8 @@ class VGG(nn.Module):
             nn.Conv2d(128, 128, 3, 1, 1),  # 16x16x128 ==> 16x16x128
             nn.BatchNorm2d(128),
             nn.ReLU(True),
-            nn.MaxPool2d(2, 2)  # 8x8x128
+            nn.MaxPool2d(2, 2),  # 8x8x128
+            nn.Dropout2d(0.1)  # 池化后随机丢弃特征图
         )
         self.block3 = nn.Sequential(
             nn.Conv2d(128, 256, 3, 1, 1),  # 8x8x128 ==> 8x8x256
@@ -40,7 +41,8 @@ class VGG(nn.Module):
             nn.Conv2d(256, 256, 3, 1, 1),  # 8x8x256 ==> 8x8x256
             nn.BatchNorm2d(256),
             nn.ReLU(True),
-            nn.MaxPool2d(2, 2)  # 4x4x256
+            nn.MaxPool2d(2, 2),  # 4x4x256
+            nn.Dropout2d(0.2),  # 仅保留一个卷积后Dropout
         )
         self.mid = nn.Sequential(
             nn.AdaptiveAvgPool2d(

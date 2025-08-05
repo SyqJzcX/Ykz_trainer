@@ -163,3 +163,21 @@ trainer.fit(
 训练图像绘制：
 
 ![train loss](./img/plot.png)
+
+## 2. 工具包
+
+### 2.1 学习率调度器
+
+- Learner.utils.lr
+   1. **线性预热+余弦退火调度器**：WarmUpCosineAnnealingLR
+   2. **绘制学习率调度器变化曲线**：draw_lr
+
+### 2.2 可视化
+
+- Learner.utils.plot
+  1. **训练损失**：draw_loss
+  2. **混淆矩阵**：conf_matrix
+
+## 3. 模型
+
+- Learner.models.vgg

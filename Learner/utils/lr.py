@@ -70,12 +70,12 @@ if __name__ == "__main__":
     # 创建调度器
     scheduler = WarmUpCosineAnnealingLR(
         optimizer,
-        warmup_epochs=5,
-        total_epochs=50,
-        warmup_start_factor=0.001,
+        warmup_epochs=10,
+        total_epochs=70,
+        warmup_start_factor=0.01,
         warmup_end_factor=1.0,
-        cos_end_factor=0.001
+        cos_end_factor=0.01
     )
 
     # 绘制学习率曲线
-    draw_lr(optimizer, scheduler, total_epochs=30)
+    draw_lr(optimizer, scheduler, total_epochs=70)

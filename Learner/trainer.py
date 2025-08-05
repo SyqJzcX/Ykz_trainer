@@ -141,26 +141,26 @@ class Trainer:
                         acc_list.append(acc)
 
                 # 早停检查
-                if dev_loss < best_dev_loss:
-                    best_dev_loss = dev_loss
-                    epochs_no_improve = 0
-                    # 保存最佳模型
-                    torch.save(self.model.state_dict(), f"{self.model_path}best_model.pth")
-                else:
-                    epochs_no_improve += 1
-                    if epochs_no_improve >= patience:
-                        print(f"早停触发: 连续 {patience} 轮验证损失未改善")
-                        break
+                # if dev_loss < best_dev_loss:
+                #     best_dev_loss = dev_loss
+                #     epochs_no_improve = 0
+                #     # 保存最佳模型
+                #     torch.save(self.model.state_dict(), f"{self.model_path}best_model.pth")
+                # else:
+                #     epochs_no_improve += 1
+                #     if epochs_no_improve >= patience:
+                #         print(f"早停触发: 连续 {patience} 轮验证损失未改善")
+                #         break
 
             # 更新学习率并监测验证集上的性能
             self.scheduler.step()
 
             train_loss = train_loss / \
-                len(self.train_dataloader) * self.batch_size  # 训练集每个批次的平均损失
+                len(self.train_dataloader)  # 训练集每个样本的平均损失
 
             if self.dev_dataloader is not None:
                 dev_loss = dev_loss / \
-                    len(self.dev_dataloader) * self.batch_size  # 验证集每个批次的平均损失
+                    len(self.dev_dataloader)  # 验证集每个样本的平均损失
                 dev_acc = np.mean(np.array(acc_list))
                 print(
                     f'第 {start_epoch + epoch + 1} 轮训练结束，训练集 loss 为 {train_loss}，发展集 loss 为 {dev_loss}，发展集准确率为 {dev_acc}')
