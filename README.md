@@ -181,3 +181,12 @@ trainer.fit(
 ## 3. 模型
 
 - Learner.models.vgg
+
+## 4. 项目结构
+
+1. 图片：./imgs
+2. 模型：./models
+   1. 模型检查点：./models/checkpoints/
+   2. 预训练模型：./models/pretrained/
+4. 数据：./data
+
