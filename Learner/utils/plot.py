@@ -120,3 +120,27 @@ def conf_matrix(conf_matrix):
     plt.xlabel('pred')
     plt.title('confusion_matrix')
     plt.show()
+
+
+def draw_lr(
+    optimizer,
+    scheduler,
+    total_epochs=50  # 总训练轮数
+):
+    """绘制学习率调度器的学习率变化曲线"""
+    # 绘制学习率曲线
+    lrs = []
+    for epoch in range(total_epochs):
+        current_lr = optimizer.param_groups[0]['lr']
+        lrs.append(current_lr)
+        print(f"Epoch {epoch+1}: LR = {current_lr:.6f}")
+        scheduler.step()  # 每个epoch更新一次学习率
+
+    # 可视化（可选）
+    plt.plot(range(1, total_epochs+1), lrs)
+    plt.xlabel("Epoch")
+    plt.ylabel("Learning Rate")
+    plt.title("SequentialLR: Warmup + Cosine Annealing")
+    plt.show()
+
+    return lrs
