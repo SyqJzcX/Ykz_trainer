@@ -2,12 +2,11 @@ import torch
 from torchvision import models, datasets, transforms
 from torch.utils.data import DataLoader
 import os
-from Learner.trainer import Trainer
+from learner.trainers.trainer import Trainer
 import torch.optim as optim
 from torch import nn
-from Learner.models.vgg import VGG
-from Learner.utils.lr import WarmUpCosineAnnealingLR, draw_lr
-from Learner.utils.plot import draw_loss, conf_matrix
+from learner.models.vgg import VGG
+from learner.utils.plot import draw_loss, conf_matrix, draw_lr
 
 
 def train():

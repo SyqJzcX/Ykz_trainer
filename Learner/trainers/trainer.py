@@ -14,7 +14,7 @@ import numpy as np
 from glob import glob
 import os
 import matplotlib.pyplot as plt
-from Learner.utils.lr import WarmUpCosineAnnealingLR
+from learner.utils.lr import WarmUpCosineAnnealingLR
 
 
 class Trainer:
@@ -42,6 +42,11 @@ class Trainer:
         else:
             self.device = torch.device("cpu")  # 如果没有可用的 GPU，则使用 CPU
             print("使用 CPU")
+            
+        # 确保模型目录存在
+        if not os.path.exists(self.model_path):
+            print(f"创建模型保存目录: {self.model_path}")
+            os.makedirs(self.model_path, exist_ok=True)
 
         # 模型
         self.model = model.to(self.device)
@@ -102,7 +107,7 @@ class Trainer:
 
             if self.dev_dataloader is not None:
                 self.dev_loss = checkpoint['dev_loss'][-1]
-                pre_acc = checkpoint['dev_acc'][-1]  # 获取之前训练的准确率
+                pre_acc = checkpoint['dev_score'][-1]  # 获取之前训练的准确率
                 print(f'先前发展集损失: {self.dev_loss}，先前发展集准确率: {pre_acc}')
 
         else:
@@ -113,7 +118,7 @@ class Trainer:
         epoch_list = []
         train_loss_list = []  # 训练集损失列表
         dev_loss_list = []  # 发展集损失列表
-        dev_acc_list = []  # 发展集准确率列表
+        dev_score_list = []  # 发展集评分列表
 
         best_dev_loss = float('inf')
         epochs_no_improve = 0
@@ -135,10 +140,10 @@ class Trainer:
                 with torch.no_grad():  # 禁用梯度计算以提高性能
                     # 计算发展集上的损失值和准确度
                     dev_loss = 0.0  # 发展集损失
-                    acc_list = []
-                    for loss, acc in self.dev_model():
+                    score_list = []
+                    for loss, score in self.dev_model():
                         dev_loss += loss.data.item()
-                        acc_list.append(acc)
+                        score_list.append(score)
 
                 # 早停检查
                 # if dev_loss < best_dev_loss:
@@ -161,12 +166,12 @@ class Trainer:
             if self.dev_dataloader is not None:
                 dev_loss = dev_loss / \
                     len(self.dev_dataloader)  # 验证集每个样本的平均损失
-                dev_acc = np.mean(np.array(acc_list))
+                dev_score = np.mean(np.array(score_list))
                 print(
-                    f'第 {start_epoch + epoch + 1} 轮训练结束，训练集 loss 为 {train_loss}，发展集 loss 为 {dev_loss}，发展集准确率为 {dev_acc}')
+                    f'第 {start_epoch + epoch + 1} 轮训练结束，训练集 loss 为 {train_loss}，发展集 loss 为 {dev_loss}，发展集评分为 {dev_score}')
                 train_loss_list.append(train_loss)
                 dev_loss_list.append(dev_loss)
-                dev_acc_list.append(dev_acc)
+                dev_score_list.append(dev_score)
                 epoch_list.append(start_epoch + epoch + 1)
 
             else:
@@ -184,7 +189,7 @@ class Trainer:
                 'epoch': list(range(pretrain + 1, pretrain + epoch_num + 1)),
                 'train_loss': train_loss_list,
                 'dev_loss': dev_loss_list,
-                'dev_acc': dev_acc_list,
+                'dev_score': dev_score_list,
             }
         else:
             # 保存模型和优化器状态

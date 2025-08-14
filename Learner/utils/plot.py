@@ -4,6 +4,13 @@ from glob import glob
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import pandas as pd
+import matplotlib.dates as mdates
+from matplotlib.colors import get_named_colors_mapping
+
+# 设置中文显示
+# plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC"]
+# plt.rcParams["axes.unicode_minus"] = False  # 正确显示负号
 
 
 def draw_loss(
@@ -18,7 +25,7 @@ def draw_loss(
     all_epochs = []
     all_train_losses = []
     all_dev_losses = []
-    all_dev_accuracies = []
+    all_dev_scores = []
 
     # 标志位：是否包含验证集指标（初始为None）
     has_dev_metrics = None
@@ -34,7 +41,7 @@ def draw_loss(
             # 如果是第一个有效文件，确定是否包含验证集指标
             if has_dev_metrics is None:
                 has_dev_metrics = (
-                    'dev_loss' in checkpoint and 'dev_acc' in checkpoint)
+                    'dev_loss' in checkpoint and 'dev_score' in checkpoint)
                 if has_dev_metrics:
                     print("检测到验证集指标，将绘制完整曲线")
                 else:
@@ -43,7 +50,7 @@ def draw_loss(
             # 如果包含验证集指标，收集验证数据
             if has_dev_metrics:
                 all_dev_losses.extend(checkpoint['dev_loss'])
-                all_dev_accuracies.extend(checkpoint['dev_acc'])
+                all_dev_scores.extend(checkpoint['dev_score'])
 
             print(file_path)
 
@@ -54,7 +61,7 @@ def draw_loss(
     if has_dev_metrics:
         # 对数据按epoch排序
         sorted_data = sorted(zip(all_epochs, all_train_losses,
-                                 all_dev_losses, all_dev_accuracies), key=lambda x: x[0])
+                                 all_dev_losses, all_dev_scores), key=lambda x: x[0])
         epochs, train_losses, dev_losses, dev_accuracies = zip(
             *sorted_data)
 
@@ -144,3 +151,87 @@ def draw_lr(
     plt.show()
 
     return lrs
+
+
+def plot_ts(
+    df,  # 包含时间戳和多特征的DataFrame
+    feature_cols=None,  # 要绘制的特征列列表，None则自动取非时间戳列
+    max_samples=None  # 时间轴长度
+):
+    """从DataFrame绘制多维时间序列曲线"""
+    # 验证索引是否为时间戳格式
+    if not pd.api.types.is_datetime64_any_dtype(df.index):
+        # 尝试将索引转换为时间戳
+        try:
+            df = df.copy()
+            df.index = pd.to_datetime(df.index)
+        except Exception as e:
+            raise ValueError(f"索引无法转换为时间戳格式: {str(e)}")
+        
+    # 只取前max_samples个样本（核心修改）
+    if max_samples:
+        total_samples = len(df)
+        if total_samples > max_samples:
+            df = df.iloc[:max_samples].copy()  # 取前max_samples行
+            print(f"Plotting first {max_samples} samples (total: {total_samples})")
+        else:
+            df = df.copy()  # 数据量不足时全取
+            print(f"Plotting all {total_samples} samples (less than max_samples)")
+
+    # 确定要绘制的特征列
+    if feature_cols is None:
+        feature_cols = df.columns.tolist()  # 默认为所有列
+    else:
+        # 检查指定的特征列是否存在
+        missing_cols = [col for col in feature_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"DataFrame中不存在这些列: {missing_cols}")
+
+    num_features = len(feature_cols)
+    if num_features == 0:
+        raise ValueError("没有可绘制的特征列")
+
+    # 创建画布和轴
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # 获取区分度高的颜色
+    colors = list(get_named_colors_mapping().values())
+    step = max(1, int(len(colors) / num_features))  # 避免颜色重复
+    selected_colors = colors[::step][:num_features]
+
+    # 绘制每条曲线（使用索引作为时间轴）
+    for i, feature in enumerate(feature_cols):
+        ax.plot(
+            df.index,  # 使用索引（时间戳）作为x轴
+            df[feature],
+            label=feature,
+            color=selected_colors[i],
+            linewidth=1.5,
+            alpha=0.8
+        )
+
+    # 设置时间轴格式
+    ax.xaxis.set_major_formatter(
+        mdates.DateFormatter(r"%Y-%m-%d %H:%M"))  # 年-月-日 时:分
+    plt.xticks(rotation=45)  # 旋转标签避免重叠
+    fig.autofmt_xdate()  # 自动调整日期显示格式
+
+    # 添加标题和标签
+    ax.set_title("Multivariate Time Series Trend (Timestamp as Index)", fontsize=14)
+    ax.set_xlabel("Time", fontsize=12)
+    ax.set_ylabel("Value", fontsize=12)
+
+    # 添加网格和图例
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(
+        loc="best",
+        fontsize=10,
+        frameon=True,
+        facecolor="white",
+        edgecolor="gray"
+    )
+
+    # 调整布局
+    plt.tight_layout()
+
+    plt.show()

@@ -19,11 +19,11 @@ class TimeSeriesDataset(Dataset):
             df = pd.read_csv(data)
             if feature_col is None:
                 raise ValueError("当data为文件路径时，必须指定feature_col")
-            self.data = df[feature_col].values.astype(np.float32)
+            self.data = df[feature_col].values.astype(np.float64)
         elif isinstance(data, pd.DataFrame):  # 从DataFrame加载
-            self.data = data.values.astype(np.float32)
+            self.data = data.values.astype(np.float64)
         elif isinstance(data, np.ndarray):  # 从numpy数组加载
-            self.data = data.astype(np.float32)
+            self.data = data.astype(np.float64)
         else:
             raise TypeError("data必须是numpy数组、CSV路径或pandas DataFrame")
 
@@ -40,5 +40,5 @@ class TimeSeriesDataset(Dataset):
         # 目标序列：[idx+seq_len, idx+seq_len+pred_len)
         y = self.data[idx + self.seq_len: idx + self.seq_len + self.pred_len]
 
-        # 转换为PyTorch Tensor，并增加特征维度（[seq_len] -> [seq_len, 1]）
-        return torch.tensor(x).unsqueeze(1), torch.tensor(y).unsqueeze(1)
+        # 转换为PyTorch Tensor，时间序列数据在 PyTorch 中的标准输入形状为：(batch_size, seq_len, num_features)
+        return torch.tensor(x), torch.tensor(y)

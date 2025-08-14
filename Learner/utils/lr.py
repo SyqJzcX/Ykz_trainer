@@ -2,7 +2,6 @@ import torch
 from torch.optim import SGD
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
 import matplotlib.pyplot as plt
-from plot import draw_lr
 
 
 def WarmUpCosineAnnealingLR(
@@ -38,22 +37,3 @@ def WarmUpCosineAnnealingLR(
         schedulers=[warmup_scheduler, cosine_scheduler],
         milestones=[warmup_epochs]  # 预热结束的步数（切换到退火）
     )
-
-
-if __name__ == "__main__":
-    # 示例用法
-    model = torch.nn.Linear(10, 1)  # 简单模型
-    optimizer = SGD(model.parameters(), lr=0.01)  # 优化器
-
-    # 创建调度器
-    scheduler = WarmUpCosineAnnealingLR(
-        optimizer,
-        warmup_epochs=10,
-        total_epochs=70,
-        warmup_start_factor=0.01,
-        warmup_end_factor=1.0,
-        cos_end_factor=0.01
-    )
-
-    # 绘制学习率曲线
-    draw_lr(optimizer, scheduler, total_epochs=70)
