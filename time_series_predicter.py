@@ -176,16 +176,16 @@ def train():
     data_path = './data/cleaned_daily_power_data.csv'
     columns = ["Global_active_power", "Global_reactive_power", "Voltage",
                "Global_intensity", "Sub_metering_1", "Sub_metering_2", "Sub_metering_3"]
-    seq_len = 200
-    pred_len = 10
+    seq_len = 150
+    pred_len = 1
     batch_size = 64
     input_features = 7  # 特征数
     epoch_num = 50  # 总训练轮次
-    learning_rate = 0.01
+    learning_rate = 0.03
     warmup_epochs = 5
     warmup_start_factor = 0.01
     warmup_end_factor = 1.0
-    cos_end_factor = 0.01
+    cos_end_factor = 0.03
 
     # 读取CSV数据
     df = pd.read_csv(
@@ -203,6 +203,9 @@ def train():
 
     train_feats, val_feats = split_three_ways(
         df, train_ratio=0.8, val_ratio=0.2, test_ratio=0)
+    
+    plot_ts(val_feats, feature_cols=["Global_active_power"])
+    print(len(val_feats))
 
     train_data = TimeSeriesDataset(
         data=train_feats[columns].values,  # 传入numpy数组
@@ -250,7 +253,8 @@ def train():
         optimizer=optimizer,
         scheduler=scheduler,
         batch_size=batch_size,
-        model_path="./models/checkpoints/"  # 模型保存路径
+        model_path="./models/checkpoints/",  # 模型保存路径
+        label_idx=index_label
     )
 
     trainer.fit(
@@ -259,6 +263,13 @@ def train():
     )
 
     draw_loss("./models/checkpoints/")  # 绘制训练损失和准确率曲线
+    
+    eva = trainer.eval(val_loader)
+    print(f"mean_squared_error: {eva['mean_squared_error']}")
+    print(f"root_mean_squared_error: {eva['root_mean_squared_error']}")
+    print(f"mean_absolute_error: {eva['mean_absolute_error']}")
+    print(f"mean_absolute_percentage_error(%): {eva['mean_absolute_percentage_error(%)']}")
+    print(f"r2_score: {eva['r2_score']}")
 
 
 if __name__ == "__main__":

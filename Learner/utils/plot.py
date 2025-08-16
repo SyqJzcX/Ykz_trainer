@@ -58,17 +58,21 @@ def draw_loss(
             print(f"读取 {file_path} 时出错，错误信息: {e}")
 
     # 对数据按epoch排序（处理可能的乱序情况）
-    if has_dev_metrics:
+    if has_dev_metrics and all_epochs:  # 确保有数据才进行排序
         # 对数据按epoch排序
         sorted_data = sorted(zip(all_epochs, all_train_losses,
                                  all_dev_losses, all_dev_scores), key=lambda x: x[0])
-        epochs, train_losses, dev_losses, dev_accuracies = zip(
+        epochs, train_losses, dev_losses, dev_scores = zip(
             *sorted_data)
 
-    else:
+    elif all_epochs:  # 仅有训练数据
         sorted_data = sorted(
             zip(all_epochs, all_train_losses), key=lambda x: x[0])
         epochs, train_losses = zip(*sorted_data)
+
+    else:
+        print("未找到有效的训练数据")
+        return
 
     # 创建图表
     fig, ax1 = plt.subplots(figsize=(12, 7))
@@ -88,19 +92,31 @@ def draw_loss(
         ax1.plot(epochs, dev_losses,
                  color='tab:orange', label='Validation Loss')
 
-        # 绘制准确率曲线（右Y轴）
+        # 绘制分数曲线（右Y轴）- 优化缩放以占满图表
         ax2 = ax1.twinx()
         color = 'tab:green'
-        ax2.set_ylabel('Accuracy (%)', color=color)
-        ax2.plot(epochs, [acc * 100 for acc in dev_accuracies],
-                 color=color, label='Validation Accuracy')
+        ax2.set_ylabel('Score', color=color)
+        ax2.plot(epochs, dev_scores,
+                 color=color, label='Validation Score')
         ax2.tick_params(axis='y', labelcolor=color)
 
-        # 确保准确率轴范围在0-100%之间，同时留出适当边距
-        min_acc = min(dev_accuracies) * 100
-        max_acc = max(dev_accuracies) * 100
-        margin = max(5, (max_acc - min_acc) * 0.1)  # 边距至少为5%或数据范围的10%
-        ax2.set_ylim(max(0, min_acc - margin), min(100, max_acc + margin))
+        # 计算分数数据范围
+        score_range = max(dev_scores) - min(dev_scores)
+
+        # 动态调整分数轴范围，确保曲线占满图表
+        # 根据数据分布自动调整边距，数据范围越小，相对边距越大
+        if score_range < 0.1:  # 数据范围很小时，使用较大边距
+            margin = 0.05
+        elif score_range < 0.5:  # 数据范围中等时，使用中等边距
+            margin = score_range * 0.2
+        else:  # 数据范围较大时，使用较小边距
+            margin = score_range * 0.1
+
+        # 设置坐标轴范围，确保数据占满图表
+        ax2.set_ylim(
+            min(dev_scores) - margin,
+            max(dev_scores) + margin
+        )
 
         # 添加图例和标题
         lines1, labels1 = ax1.get_legend_handles_labels()
@@ -167,16 +183,18 @@ def plot_ts(
             df.index = pd.to_datetime(df.index)
         except Exception as e:
             raise ValueError(f"索引无法转换为时间戳格式: {str(e)}")
-        
+
     # 只取前max_samples个样本（核心修改）
     if max_samples:
         total_samples = len(df)
         if total_samples > max_samples:
             df = df.iloc[:max_samples].copy()  # 取前max_samples行
-            print(f"Plotting first {max_samples} samples (total: {total_samples})")
+            print(
+                f"Plotting first {max_samples} samples (total: {total_samples})")
         else:
             df = df.copy()  # 数据量不足时全取
-            print(f"Plotting all {total_samples} samples (less than max_samples)")
+            print(
+                f"Plotting all {total_samples} samples (less than max_samples)")
 
     # 确定要绘制的特征列
     if feature_cols is None:
@@ -217,7 +235,8 @@ def plot_ts(
     fig.autofmt_xdate()  # 自动调整日期显示格式
 
     # 添加标题和标签
-    ax.set_title("Multivariate Time Series Trend (Timestamp as Index)", fontsize=14)
+    ax.set_title(
+        "Multivariate Time Series Trend (Timestamp as Index)", fontsize=14)
     ax.set_xlabel("Time", fontsize=12)
     ax.set_ylabel("Value", fontsize=12)
 
@@ -230,6 +249,77 @@ def plot_ts(
         facecolor="white",
         edgecolor="gray"
     )
+
+    # 调整布局
+    plt.tight_layout()
+
+    plt.show()
+
+
+def plot_forecast_comparison(
+    original_series,  # numpy数组，原始时间序列数据
+    predicted_series,  # numpy数组，模型预测的时间序列数据
+    start_date=None,  # 可选， datetime对象，序列的起始日期
+    time_interval='day',  # 时间间隔，可选值：'day', 'hour', 'minute'
+    title='Comparison of time series forecasting',  # 图表标题
+    xlabel='Time',  # x轴标签
+    ylabel='Value',  # y轴标签
+    figsize=(12, 6)  # 图表大小
+):
+    """绘制时间序列预测的原始序列与预测序列对比图"""
+    # 确保两个序列长度一致
+    if len(original_series) != len(predicted_series):
+        raise ValueError("原始序列和预测序列的长度必须一致")
+
+    # 生成时间轴
+    n_points = len(original_series)
+    if start_date is None:
+        # 如果没有提供起始日期，使用索引作为时间轴
+        time_axis = np.arange(n_points)
+        use_dates = False
+    else:
+        # 根据起始日期和时间间隔生成日期时间轴
+        use_dates = True
+        if time_interval == 'day':
+            time_axis = [start_date +
+                         datetime.timedelta(days=i) for i in range(n_points)]
+        elif time_interval == 'hour':
+            time_axis = [start_date +
+                         datetime.timedelta(hours=i) for i in range(n_points)]
+        elif time_interval == 'minute':
+            time_axis = [start_date +
+                         datetime.timedelta(minutes=i) for i in range(n_points)]
+        else:
+            raise ValueError("time_interval必须是'day', 'hour'或'minute'")
+
+    # 创建图表
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # 绘制原始序列
+    ax.plot(time_axis, original_series, label='Original series',
+            color='tab:blue', linewidth=2, linestyle='-')
+
+    # 绘制预测序列
+    ax.plot(time_axis, predicted_series, label='Predicted series',
+            color='tab:orange', linewidth=2, linestyle='-')
+
+    # 添加网格线
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+    # 设置标签和标题
+    ax.set_xlabel(xlabel, fontsize=12)
+    ax.set_ylabel(ylabel, fontsize=12)
+    ax.set_title(title, fontsize=14, pad=20)
+
+    # 设置x轴日期格式（如果使用日期）
+    if use_dates:
+        ax.xaxis.set_major_locator(DayLocator(
+            interval=max(1, n_points//10)))  # 自动调整刻度密度
+        ax.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+        plt.xticks(rotation=45, ha='right')  # 旋转日期标签，避免重叠
+
+    # 添加图例
+    ax.legend(fontsize=10, loc='best')
 
     # 调整布局
     plt.tight_layout()

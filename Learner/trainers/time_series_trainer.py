@@ -2,7 +2,13 @@ from learner.trainers.trainer import Trainer
 import torch
 from tqdm import tqdm
 import numpy as np
-from sklearn.metrics import r2_score
+from sklearn.metrics import (
+    mean_squared_error,
+    mean_absolute_error,
+    r2_score,
+    mean_absolute_percentage_error
+)
+from learner.utils.plot import plot_forecast_comparison
 
 
 class TimeSeriesTrainer(Trainer):
@@ -70,8 +76,7 @@ class TimeSeriesTrainer(Trainer):
 
             # 损失
             loss = self.criterion(pred, label)
-            preds = torch.argmax(out, dim=1)  # 预测类别
-            
+
             # 转换为numpy并展平（单个批次的所有时间点）
             preds_np = pred.cpu().numpy().flatten()  # 形状：(256*2,) = (512,)
             labels_np = label.cpu().numpy().flatten()
@@ -83,3 +88,37 @@ class TimeSeriesTrainer(Trainer):
 
     def eval(self, test_dataloader):
         '''模型评估'''
+        self.model.eval()  # 设置模型为评估模式
+
+        # 计算测试集上的准确度
+        test_true = []
+        test_pred = []
+        for data, label in tqdm(test_dataloader, desc="Evaluating", unit="batch"):
+            data = data.to(self.device, dtype=torch.float32)
+            label = label.to(self.device, dtype=torch.float32)
+
+            # 提取目标特征列
+            label = label[:, :, self.label_idx].unsqueeze(-1)
+
+            with torch.no_grad():  # 评估模式，不计算梯度，节省内存
+                out = self.model(data)  # 输出
+
+            pred = out[:, :, self.label_idx].unsqueeze(-1)  # 预测
+
+            test_pred.extend(pred.cpu().numpy().flatten())  # 放入列表末尾
+            test_true.extend(label.cpu().numpy().flatten())
+
+        plot_forecast_comparison(
+            original_series=test_true, predicted_series=test_pred)
+        
+        print(len(test_pred))
+        print(len(test_true))
+
+        # 计算评估指标
+        return {
+            "mean_squared_error": mean_squared_error(test_true, test_pred),
+            "root_mean_squared_error": np.sqrt(mean_squared_error(test_true, test_pred)),
+            "mean_absolute_error": mean_absolute_error(test_true, test_pred),
+            "mean_absolute_percentage_error(%)": mean_absolute_percentage_error(test_true, test_pred) * 100,
+            "r2_score": r2_score(test_true, test_pred)
+        }
