@@ -1,4 +1,4 @@
-# DeepLearner————基于 Pytorch 的深度学习模型训练工具
+# DeepLearner——基于 Pytorch 的深度学习模型训练工具
 
 为**黄绪艺**专门编写的 Pytorch 深度学习框架工具教程，有问题 *@神奇之星*【😜】
 
