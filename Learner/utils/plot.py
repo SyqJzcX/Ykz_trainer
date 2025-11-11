@@ -1,3 +1,4 @@
+import datetime
 import os
 import torch
 from glob import glob
@@ -148,22 +149,23 @@ def conf_matrix(conf_matrix):
 def draw_lr(
     optimizer,
     scheduler,
-    total_epochs=50  # 总训练轮数
+    total_steps=50,  # 总训练轮数
+    label="Learning Rate Schedule"  # 曲线标签（用于多曲线对比）
 ):
     """绘制学习率调度器的学习率变化曲线"""
     # 绘制学习率曲线
     lrs = []
-    for epoch in range(total_epochs):
+    for epoch in range(total_steps):
         current_lr = optimizer.param_groups[0]['lr']
         lrs.append(current_lr)
-        print(f"Epoch {epoch+1}: LR = {current_lr:.6f}")
+        # print(f"Epoch {epoch+1}: LR = {current_lr:.6f}")
         scheduler.step()  # 每个epoch更新一次学习率
 
     # 可视化（可选）
-    plt.plot(range(1, total_epochs+1), lrs)
-    plt.xlabel("Epoch")
+    plt.plot(range(1, total_steps+1), lrs, label=label, linewidth=2)
+    plt.xlabel("STep")
     plt.ylabel("Learning Rate")
-    plt.title("SequentialLR: Warmup + Cosine Annealing")
+    # plt.title("SequentialLR: Warmup + Cosine Annealing")
     plt.show()
 
     return lrs
@@ -313,9 +315,9 @@ def plot_forecast_comparison(
 
     # 设置x轴日期格式（如果使用日期）
     if use_dates:
-        ax.xaxis.set_major_locator(DayLocator(
+        ax.xaxis.set_major_locator(mdates.DayLocator(
             interval=max(1, n_points//10)))  # 自动调整刻度密度
-        ax.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
         plt.xticks(rotation=45, ha='right')  # 旋转日期标签，避免重叠
 
     # 添加图例

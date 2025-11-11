@@ -1,4 +1,4 @@
-from learner.trainers.trainer import Trainer
+from Learner.trainers.trainer import Trainer
 import torch
 from tqdm import tqdm
 import numpy as np
@@ -8,10 +8,10 @@ from sklearn.metrics import (
     r2_score,
     mean_absolute_percentage_error
 )
-from learner.utils.plot import plot_forecast_comparison
+from Learner.utils.plot import plot_forecast_comparison
 
 
-class TimeSeriesTrainer(Trainer):
+class TimeSeriesPredictTrainer(Trainer):
     def __init__(
         self,
         model,  # 模型
@@ -25,7 +25,7 @@ class TimeSeriesTrainer(Trainer):
         model_path='./models/checkpoints/',  # 模型检查点保存路径
         label_idx=0  # 指定需要预测的特征索引（0-6）
     ):
-        super(TimeSeriesTrainer, self).__init__(
+        super(TimeSeriesPredictTrainer, self).__init__(
             model,  # 模型
             train_dataloader=train_dataloader,  # 训练集加载器
             dev_dataloader=dev_dataloader,  # 发展集加载器：有无发展集均可

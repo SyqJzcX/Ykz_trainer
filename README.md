@@ -1,44 +1,115 @@
-# 基于 Pytorch 的深度学习模型训练工具
+# DeepLearner————基于 Pytorch 的深度学习模型训练工具
 
-## 1. Trainer 类
+为**黄绪艺**专门编写的 Pytorch 深度学习框架工具教程，有问题 *@神奇之星*【😜】
+
+## 1. 项目结构
+
+1. **模型**：./models【空，存放预训练模型与检查点】
+   1. **模型检查点**：./models/checkpoints/
+   2. **预训练模型**：./models/pretrained/
+2. **数据**：./data【空，存放任务数据集】
+3. **模型训练与评估框架（核心）**：./Learner
+   1. **工具包**：./Learner/utils
+   2. **自定义模型类**：./Learner/models
+   3. **数据集构建类**：./Learner/datasets
+   4. **模型训练类**：./Learner/trainers
+
+## 2. 工具包
+
+### 2.1 自定义学习率调度器
+
+- Learner.utils.lr
+   1. **线性预热+余弦退火调度器**：WarmUpCosineAnnealingLR
+   2. **绘制学习率调度器变化曲线**：draw_lr
+
+![learning rate](./imgs/lr.png)
+
+### 2.2 数据集划分
+
+- Learner.utils.split
+   1. **按照比例划分训练集、验证集（可选）、测试集（可选）**：split_three_ways
+
+### 2.3 可视化
+
+- Learner.utils.plot
+  1. **训练损失**：draw_loss
+  2. **混淆矩阵**：conf_matrix
+  3. **多维时间序列曲线**：plot_ts
+  4. **时间序列预测曲线**：plot_forecast_comparison
+
+![conf_matrix](./imgs/conf.png)
+
+![time_series](./imgs/series.png)
+
+![series_forecast](./imgs/forecast.png)
+
+## 3. 模型
+
+存放一些自定义的模型架构
+
+- Learner.models：
+   - Vgg
+   - Conv1d+GRU
+
+## 4. 数据集构建类
+
+存放一些自定义的数据集构建类：
+- Learner.datasets：
+   - time_series_datasets：多维时间序列预测数据加载
+   - textformer_datasets：Transformer Transformer 文本标签对加载
+
+## 5. Trainer 类
 
 定义于`trainer.py`中。
 
 **功能：**
 
-1. 定义模型训练所需工具：
-   1. 优化器
-   2. 学习率调度器
-   3. 梯度缩放器
-   4. . . .
-2. 定义模型训练所需超参数
-   1. epoch
-   2. batch_size
-   3. learning_rate
-   4. . . .
-3. 加载模型训练所需数据
-   1. 训练集
-   2. 发展集（可选，不改变使用方法）
-4. 保存模型检查点，包含：
-   1. 模型参数
-   2. 优化器状态
-   3. 训练的轮数
-   4. 训练集损失
-   5. 发展集损失（没有发展集则没有）
-   6. 发展及准确率（没有发展集则没有）
-5. 模型训练方法
-   1. 可分段训练，只需指明加载模型的编号即可
-      1. 检查点命名规则：`checkpoint_*.pth`，其中`*`为加载的模型的训练总轮数
-      2. 训练后按规则保存新检查点
-   2. 通过继承模型自定义模型训练与验证方法
-6. 训练数据图像绘制
-   1. 训练集损失曲线
-   2. 发展集损失曲线（没有发展集则没有）
-   3. 发展集准确率曲线（没有发展集则没有）
+1. 初始化：__init__
+   1. 定义模型训练所需工具
+      1. 优化器
+      2. 学习率调度器
+      3. 梯度缩放器
+      4. 损失函数
+      5. . . .
+   2. 定义模型训练所需超参数
+      1. epochs
+      2. batch_size
+      3. learning_rate
+      4. . . .
+   3. 加载模型训练所需数据
+      1. 训练集
+      2. 发展集（可选，不改变使用方法）
+   4. 自动检测 GPU
+2. 模型训练接口：__fit__
+   1. 管理模型检查点，包含：
+      1. 模型参数
+      2. 优化器状态
+      3. 训练的轮数
+      4. 训练集损失
+      5. 发展集损失（没有发展集则没有）
+      6. 发展及准确率（没有发展集则没有）
+   2. 模型训练方法
+      1. **可分段训练**，只需指明加载模型的编号即可
+         1. 检查点命名规则：`checkpoint_*.pth`，其中`*`为加载的模型的训练总轮数
+         2. 训练后按规则保存新检查点
+      2. 通过**继承 Trainer 类**自定义模型训练与验证方法
+   3. 训练数据图像绘制
+      1. 训练集损失曲线
+      2. 发展集损失曲线（没有发展集则没有）
+      3. 发展集准确率曲线（没有发展集则没有）
 7. 模型评估
 8. 模型预测
 
 **用法演示：**
+
+1. 根据任务，定义**数据集构建方式**
+2. 在外部定义好相应的工具（优化器、学习率调度器、数据集加载器 ...）
+3. 继承 Trainer 类并根据任务**重写以下方法**
+   1. __forward_pass__：前向传播与损失计算
+   2. __dev__：模型验证与指标计算
+   3. __eval__：模型评估方法
+   4. __predict__：模型预测方法
+4. **实例化**自定义的 Trainer 子类，传入相应的参数，调用 **fit** 方法即可进行流畅训练
 
 ```Python
 # 定义模型参数
@@ -50,7 +121,7 @@ num_attention_heads = 8  # 注意力头的数量
 num_labels = len(tag_set)  # 标签数量
 batch_size = 256  # 样本批量
 
-# 初始化EncoderModel+CRF模型对象
+# 初始化模型对象
 model = EncoderModelWithCRF(
         vocab_size, 
         max_position_embeddings,
@@ -162,31 +233,4 @@ trainer.fit(
 
 训练图像绘制：
 
-![train loss](./img/plot.png)
-
-## 2. 工具包
-
-### 2.1 学习率调度器
-
-- Learner.utils.lr
-   1. **线性预热+余弦退火调度器**：WarmUpCosineAnnealingLR
-   2. **绘制学习率调度器变化曲线**：draw_lr
-
-### 2.2 可视化
-
-- Learner.utils.plot
-  1. **训练损失**：draw_loss
-  2. **混淆矩阵**：conf_matrix
-
-## 3. 模型
-
-- Learner.models.vgg
-
-## 4. 项目结构
-
-1. 图片：./imgs
-2. 模型：./models
-   1. 模型检查点：./models/checkpoints/
-   2. 预训练模型：./models/pretrained/
-4. 数据：./data
-
+![train loss](./imgs/loss.png)
