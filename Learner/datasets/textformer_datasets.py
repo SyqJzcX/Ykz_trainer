@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 
 
-class NewsDataset(Dataset):
+class TextFormerDataset(Dataset):
     def __init__(self, csv_path, tokenizer, label2id, max_seq_length=48):
         """
         Args:
