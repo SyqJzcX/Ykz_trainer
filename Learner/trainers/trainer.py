@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.optim as optim
+from torch.amp import autocast, GradScaler
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -14,7 +15,6 @@ from glob import glob
 import os
 import matplotlib.pyplot as plt
 from Learner.utils.lr import WarmUpCosineAnnealingLR
-from torch.cuda.amp import autocast, GradScaler
 import warnings
 
 
@@ -106,6 +106,8 @@ class Trainer:
                 checkpoint['model_state_dict'])  # 加载模型参数
             self.optimizer.load_state_dict(
                 checkpoint['optimizer_state_dict'])  # 加载优化器状态
+            self.scheduler.load_state_dict(
+                checkpoint['scheduler_state_dict'])  # 加载学习率调度器状态
             # 获取之前训练的轮数（理论上 start_epoch == pretrain）
             start_epoch = checkpoint['epoch'][-1]
             pre_loss = checkpoint['train_loss'][-1]  # 获取之前训练的损失
@@ -113,7 +115,7 @@ class Trainer:
             print(
                 f'加载预训练模型: {pretrain}，已训练轮数: {start_epoch}，先前训练集损失: {pre_loss}')
 
-            if self.dev_dataloader is not None:
+            if self.dev_dataloader is not None and 'dev_metrics' in checkpoint:
                 self.dev_loss = checkpoint['dev_loss'][-1]
                 pre_acc = checkpoint['dev_score'][-1]  # 获取之前训练的准确率
                 print(f'先前发展集损失: {self.dev_loss}，先前发展集准确率: {pre_acc}')
@@ -126,12 +128,16 @@ class Trainer:
         epoch_list = []
         train_loss_list = []  # 训练集损失列表
         dev_loss_list = []  # 发展集损失列表
-        dev_score_list = []  # 发展集评分列表
+        dev_metrics_list = []  # 发展集评分列表
 
         # best_dev_loss = float('inf')
         # epochs_no_improve = 0
 
         for epoch in range(epoch_num):
+            current_epoch = start_epoch + epoch + 1
+            print(
+                f"\n===== 第 {current_epoch}/{start_epoch + epoch_num} 轮训练 =====")
+
             # 遍历训练集，训练模型参数
             self.model.train()  # 设置模型为训练模式
             train_loss = 0.0  # 训练集损失
@@ -141,17 +147,17 @@ class Trainer:
                 train_loss += loss.data.item()  # 获取损失值并求和
 
             # 存在发展集
-            if self.dev_dataloader is not None:
+            if self.dev_dataloader is not None and 'dev_metrics' in checkpoint:
                 # 计算发展集上的损失值
                 self.model.eval()  # 设置模型为评估模式
                 dev_loss = 0.0  # 发展集损失
-                score_list = []  # 每个批次的分数列表
+                metrics_list = []  # 每个批次的分数列表
                 dev_batch_size_list = []  # 每个批次的样本数
                 with torch.no_grad():    # 禁用梯度计算（节省显存+提速）
                     # 计算发展集上的损失值和准确度
-                    for loss, score, batch_size in self.dev:
+                    for loss, score, batch_size in self.dev():
                         dev_loss += loss.data.item()
-                        score_list.append(score)
+                        metrics_list.append(score)
                         dev_batch_size_list.append(batch_size)
 
                 # 早停检查
@@ -177,20 +183,20 @@ class Trainer:
                 # -------------------------- 计算数据集整体分数 --------------------------
                 total_samples = sum(dev_batch_size_list)  # 数据集总样本数
                 if total_samples == 0:
-                    dev_score = 0.0  # 避免除以0
+                    dev_metrics = 0.0  # 避免除以0
                 else:
                     # 转换为 numpy 数组计算（更高效）
-                    score_array = np.array(score_list)
+                    metrics_array = np.array(metrics_list)
                     batch_size_array = np.array(dev_batch_size_list)
-                    dev_score = np.sum(
-                        score_array * batch_size_array) / total_samples
+                    dev_metrics = np.sum(
+                        metrics_array * batch_size_array) / total_samples
                 # ------------------------------------------------------------------------
 
                 print(
-                    f'第 {start_epoch + epoch + 1} 轮训练结束，训练集 loss 为 {train_loss}，发展集 loss 为 {dev_loss}，发展集评分为 {dev_score}')
+                    f'第 {start_epoch + epoch + 1} 轮训练结束，训练集 loss 为 {train_loss}，发展集 loss 为 {dev_loss}，发展集评分为 {dev_metrics}')
                 train_loss_list.append(train_loss)
                 dev_loss_list.append(dev_loss)
-                dev_score_list.append(dev_score)
+                dev_metrics_list.append(dev_metrics)
                 epoch_list.append(start_epoch + epoch + 1)
 
             else:
@@ -202,13 +208,14 @@ class Trainer:
         # -------------------------- 保存模型和优化器状态 --------------------------
         if self.dev_dataloader is not None:
             checkpoint = {
-                'model_state_dict': self.model.state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
+                'model_state_dict': self.model.state_dict(),  # 模型权重
+                'optimizer_state_dict': self.optimizer.state_dict(),  # 优化器状态：参数梯度、动量等信息
+                'scheduler_state_dict': self.scheduler.state_dict(),  # 学习率调度器状态：已训练步数、预热进度、衰减系数等
                 # 本次训练的轮数列表
                 'epoch': list(range(pretrain + 1, pretrain + epoch_num + 1)),
-                'train_loss': train_loss_list,
-                'dev_loss': dev_loss_list,
-                'dev_score': dev_score_list,
+                'train_loss': train_loss_list,  # 训练集损失列表
+                'dev_loss': dev_loss_list,  # 验证集损失列表
+                'dev_metrics': dev_metrics_list,  #
             }
         else:
             checkpoint = {
@@ -226,27 +233,28 @@ class Trainer:
     def forward_pass(self, batch, is_training=True):
         """模型前向传播与损失计算"""
         # TODO: 需重写方法，视任务而定
-        for batch in tqdm(self.train_dataloader, desc="模型训练"):
-            # 数据移到GPU/CPU
-            input_ids = batch["input_ids"].to(self.device)
-            attention_mask = batch["attention_mask"].to(self.device)
-            labels = batch["labels"].to(self.device)
+        # 数据移到GPU/CPU
+        input_ids = batch["input_ids"].to(self.device)
+        attention_mask = batch["attention_mask"].to(self.device)
+        labels = batch["labels"].to(self.device)
 
-            # 训练模式才清空梯度，验证模式跳过
-            if is_training:
-                self.optimizer.zero_grad()
+        # 训练模式才清空梯度，验证模式跳过
+        if is_training:
+            self.optimizer.zero_grad()
 
-            # 混合精度前向传播（FP16）
-            with autocast(enabled=self.use_fp16):
-                outputs = outputs = self.model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    labels=labels
-                )
-                loss = outputs.loss
-                logits = outputs.logits  # 预测分数（供后续计算准确率）
+        # 混合精度前向传播（FP16）
+        with autocast(enabled=self.use_fp16, device_type=self.device.type):
+            outputs = outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels
+            )
+            loss = outputs.loss
+            logits = outputs.logits  # 预测分数（供后续计算准确率）
 
-            return loss, logits, labels.size(0)  # 当前批次样本数
+            self._check_autocast_usage(loss)
+
+        return loss, logits, labels.size(0)  # 当前批次样本数
 
     def _check_autocast_usage(self, loss: torch.Tensor):
         """检测：use_fp16=True 时，前向传播是否启用了 autocast"""
@@ -271,9 +279,6 @@ class Trainer:
 
     def parameter_update(self, loss: torch.Tensor):
         """模型参数更新方法，用于在训练方法内部前向传播之后调用"""
-        # 先检测 autocast 使用情况（在反向传播前执行，不影响训练）
-        self._check_autocast_usage(loss)
-
         if self.use_fp16:
             # 混合精度
             scaled_loss = self.scaler.scale(loss)
@@ -297,7 +302,7 @@ class Trainer:
         # TODO: 需重写方法，视任务而定
         for batch in tqdm(self.train_dataloader, desc="模型训练"):
             # 1. 前向流程：清空梯度→前向传播→计算损失
-            loss, _, batch_size = self.forward_pass(batch)
+            loss, _, batch_size = self.forward_pass(batch, is_training=True)
 
             # 2. 更新流程：反向传播→参数更新
             self.parameter_update(loss)
